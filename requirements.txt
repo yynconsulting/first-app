@@ -1,0 +1,6 @@
+streamlit
+spacy==3.5.1
+spacy-lookups-data==1.0.3
+numpy
+pandas
+matplotlib
