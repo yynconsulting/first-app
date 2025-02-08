@@ -1,5 +1,12 @@
+import os
 import spacy
-import re
+
+# 自动安装 spaCy 语言模型（防止 Streamlit Cloud 缺少 `en_core_web_sm`）
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    os.system("python -m spacy download en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
 
 def process_transaction(transaction_input):
     """
