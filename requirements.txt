@@ -1,5 +1,5 @@
 streamlit
-spacy==3.5.1
+spacy==3.4.4
 spacy-lookups-data==1.0.3
 numpy
 pandas
