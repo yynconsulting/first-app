@@ -1,7 +1,14 @@
-streamlit
-spacy==3.4.4
-spacy-lookups-data==1.0.3
-thinc==8.1.10
-numpy
-pandas
-matplotlib
+streamlit==1.9.0              # Streamlit version, adjust if necessary
+spacy==3.4.4                  # spaCy version
+spacy-lookups-data==1.0.3     # For lookup data required by spaCy
+thinc==8.0.0                 # thinc, required by spaCy
+numpy==1.21.2                # Ensure the numpy version is compatible with spaCy
+pandas==1.3.3                # Pandas version for data processing
+matplotlib==3.4.3            # Matplotlib for plotting and visualizations
+
+# If you're using a specific spaCy model like en_core_web_sm, ensure this is installed
+en-core-web-sm==3.0.0        # spaCy English model, adjust version if necessary
+
+# Optional dependencies if you're using other packages, uncomment if needed
+# requests==2.26.0            # For handling HTTP requests
+# sqlalchemy==1.4.23          # If you're using SQLAlchemy for DB interaction
