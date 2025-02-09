@@ -18,11 +18,16 @@ def generate_journal_entries(transaction_details):
 st.title("Intelligent Accounting Software")
 st.subheader("Please input the transaction details (use semicolon ; to separate multiple transactions):")
 
-# User input
+# User input for transactions
 transaction_input = st.text_input("Enter transaction details", "")
 
-if transaction_input:
-    # Generate and display journal entries
-    entries = generate_journal_entries(transaction_input)
-    for entry in entries:
-        st.write(entry)
+# Button to generate journal entries
+if st.button('Generate Journal Entries'):
+    if transaction_input:
+        # Generate and display journal entries
+        entries = generate_journal_entries(transaction_input)
+        st.write("Generated Journal Entries:")
+        for entry in entries:
+            st.write(entry)
+    else:
+        st.warning("Please enter the transaction details.")
