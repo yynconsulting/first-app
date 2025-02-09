@@ -3,7 +3,7 @@ name: Deploy Streamlit App
 on:
   push:
     branches:
-      - main  # 或者您使用的分支名称
+      - main  # 确保您使用的是正确的分支名，通常是 main
 
 jobs:
   deploy:
@@ -25,9 +25,8 @@ jobs:
 
       - name: Install spaCy model
         run: |
-          python -m spacy download en_core_web_sm  # 下载并安装 spaCy 模型
+          python -m spacy download en_core_web_sm
 
       - name: Run Streamlit app
         run: |
-          streamlit run streamlit_app.py
-
+          streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
