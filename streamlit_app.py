@@ -2,16 +2,17 @@ import streamlit as st
 
 # Simulate the journal entry generation function
 def generate_journal_entries(transaction_details):
-    # Here, you can add the logic to process the transactions and generate journal entries
     entries = []
     transactions = transaction_details.split(";")
     
     for transaction in transactions:
-        if "sales income" in transaction.lower():
-            entries.append("Debit: Cash 5000, Credit: Sales Income 5000")
-        elif "purchase" in transaction.lower():
-            entries.append("Debit: Purchase Expenses 3000, Credit: Bank Deposit 3000")
-    
+        # Handle sales transaction and received in cash
+        if "sold goods" in transaction.lower() and "received in cash" in transaction.lower():
+            amount = 100  # Extract amount from the sentence (hardcoded for now)
+            entries.append(f"Debit: Cash ${amount}, Credit: Sales Revenue ${amount}")
+        # Handle other types of transactions here
+        # You can add more conditions to handle different transaction types
+        
     return entries
 
 # Streamlit page content
