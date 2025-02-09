@@ -20,7 +20,7 @@ payment_keywords = {
     'cheque': ['cheque', 'check'],
 }
 
-# 交易类型规则字典（包括所有类型）
+# 交易类型规则字典
 transaction_rules = {
     'sales': {
         'keywords': ['sold', 'sales', 'payment received', 'goods sold'],
@@ -38,46 +38,6 @@ transaction_rules = {
         'taxable': False,
         'rule': 'purchase_transaction_rules'
     },
-    'lease_out': {
-        'keywords': ['leased out', 'lease income', 'rented out', 'rent income'],
-        'main_account': 'Lease Income',
-        'counterpart_account': 'Cash',
-        'debit_credit_direction': 'credit',
-        'taxable': True,
-        'rule': 'lease_out_transaction_rules'
-    },
-    'lease_in': {
-        'keywords': ['leased', 'lease expense', 'rented', 'rent expense'],
-        'main_account': 'Lease Expense',
-        'counterpart_account': 'Bank',
-        'debit_credit_direction': 'debit',
-        'taxable': False,
-        'rule': 'lease_in_transaction_rules'
-    },
-    'investment': {
-        'keywords': ['invested', 'investment', 'purchased shares', 'bought bonds'],
-        'main_account': 'Investment',
-        'counterpart_account': 'Bank',
-        'debit_credit_direction': 'debit',
-        'taxable': False,
-        'rule': 'investment_transaction_rules'
-    },
-    'loan_repayment': {
-        'keywords': ['loan repayment', 'loan payback', 'paid loan'],
-        'main_account': 'Loan Payable',
-        'counterpart_account': 'Cash',
-        'debit_credit_direction': 'debit',
-        'taxable': False,
-        'rule': 'loan_repayment_transaction_rules'
-    },
-    'revenue_recognition': {
-        'keywords': ['recognized revenue', 'revenue recognition'],
-        'main_account': 'Revenue',
-        'counterpart_account': 'Accounts Receivable',
-        'debit_credit_direction': 'credit',
-        'taxable': True,
-        'rule': 'revenue_recognition_transaction_rules'
-    },
     # 更多交易类型规则...
 }
 
@@ -85,12 +45,11 @@ transaction_rules = {
 nlp = spacy.load("en_core_web_sm")
 
 # ============================
-# 2. 识别语句：提取关键信息并选择交易规则
+# 2. 提取交易细节
 # ============================
 def extract_entities(sentence):
     """
     使用 spaCy 提取交易语句中的金额、支付方式、州信息，并判断是否已支付款项或未收到款项。
-    同时，利用语义分析识别交易类型。
     """
     doc = nlp(sentence)  # 使用已加载的 nlp 模型进行处理
     entities = {
@@ -128,19 +87,13 @@ def extract_entities(sentence):
                 entities['transaction_type'] = 'purchase'
             elif token.lemma_ in ['sell', 'sales']:  # 销售
                 entities['transaction_type'] = 'sales'
-            elif token.lemma_ in ['lease', 'rent']:  # 租赁
-                entities['transaction_type'] = 'lease_out'  # 假设是出租
-            elif token.lemma_ in ['invest', 'investment']:  # 投资
-                entities['transaction_type'] = 'investment'
             # 更多的交易类型判断...
 
     return entities
 
 # ============================
-# 3. 交易类型规则函数
+# 销售交易规则（包括税务处理）
 # ============================
-
-# 销售交易规则
 def sales_transaction_rules(entities):
     amounts = entities['amounts']
     payment_methods = entities['payment_methods'] or ['bank transfer']
@@ -151,14 +104,16 @@ def sales_transaction_rules(entities):
     for i, amount in enumerate(amounts):
         # 计算销售税
         sales_tax = round(amount * sales_tax_rate_by_state.get(state, 0), 2)
+        total_amount = amount + sales_tax  # 总金额 = 销售额 + 销售税
         counterpart_account = payment_methods[i] if i < len(payment_methods) else payment_methods[0]
 
+        # 销售税处理
         if not_received:
-            journal_entry[f'Debit_{i+1}'] = f"Accounts Receivable {amount + sales_tax}"
+            journal_entry[f'Debit_{i+1}'] = f"Accounts Receivable {total_amount}"
             journal_entry[f'Credit_{i+1}'] = f"Sales Revenue {amount}"
             journal_entry[f'Credit_Tax_{i+1}'] = f"Sales Tax Payable {sales_tax}"
         else:
-            journal_entry[f'Debit_{i+1}'] = f"{counterpart_account.capitalize()} {amount + sales_tax}"
+            journal_entry[f'Debit_{i+1}'] = f"{counterpart_account.capitalize()} {total_amount}"
             journal_entry[f'Credit_{i+1}'] = f"Sales Revenue {amount}"
             journal_entry[f'Credit_Tax_{i+1}'] = f"Sales Tax Payable {sales_tax}"
 
@@ -184,7 +139,7 @@ def purchase_transaction_rules(entities):
     return journal_entry
 
 # ============================
-# 4. Streamlit UI部分
+# Streamlit UI部分
 # ============================
 
 # 标题和说明
@@ -228,4 +183,3 @@ if st.button("Generate Journal Entries"):
                 st.write(entry)
     else:
         st.warning("Please enter the transaction details.")
-
