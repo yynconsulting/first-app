@@ -1,21 +1,28 @@
 import streamlit as st
-import final  # 假设 final.py 包含处理交易的逻辑
 
-# 设置页面标题
-st.title("智能记账系统")
+# Simulate the journal entry generation function
+def generate_journal_entries(transaction_details):
+    # Here, you can add the logic to process the transactions and generate journal entries
+    entries = []
+    transactions = transaction_details.split(";")
+    
+    for transaction in transactions:
+        if "sales income" in transaction.lower():
+            entries.append("Debit: Cash 5000, Credit: Sales Income 5000")
+        elif "purchase" in transaction.lower():
+            entries.append("Debit: Purchase Expenses 3000, Credit: Bank Deposit 3000")
+    
+    return entries
 
-# 创建用户输入框
-transaction_input = st.text_area("请输入交易详情（支持多条交易，用分号 `;` 分隔）：")
+# Streamlit page content
+st.title("Intelligent Accounting Software")
+st.subheader("Please input the transaction details (use semicolon ; to separate multiple transactions):")
 
-# 提交按钮
-if st.button("提交交易"):
-    if transaction_input:
-        try:
-            # 调用 final.py 中的处理函数
-            journal_entries = final.process_transaction(transaction_input)
-            st.subheader("生成的会计分录：")
-            st.json(journal_entries)  # 展示生成的会计分录
-        except Exception as e:
-            st.error(f"处理交易时发生错误：{e}")
-    else:
-        st.warning("请输入交易内容！")
+# User input
+transaction_input = st.text_input("Enter transaction details", "")
+
+if transaction_input:
+    # Generate and display journal entries
+    entries = generate_journal_entries(transaction_input)
+    for entry in entries:
+        st.write(entry)
