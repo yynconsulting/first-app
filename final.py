@@ -1,81 +1,128 @@
-import os
+import re
+import streamlit as st
 import spacy
+import os
 
+# 加载spaCy模型
 try:
     nlp = spacy.load("en_core_web_sm")
 except OSError:
     os.system("python -m spacy download en_core_web_sm")
     nlp = spacy.load("en_core_web_sm")
 
+# 交易类型列表
+TRANSACTION_TYPES = [
+    'sales', 'purchase', 'lease_out', 'lease_in', 'investment', 'fundraising', 
+    'repayment', 'receipts', 'payments', 'other_receivables', 'other_payables',
+    'prepaid', 'prepaid_expenses', 'shareholder_investments', 'shareholder_withdrawals', 
+    'external_investment', 'loan_received', 'loan_repayment', 'dividend_payment',
+    'donation_received', 'government_grant', 'employee_reimbursement', 'contingent_event',
+    'asset_swap', 'inventory_adjustment'
+]
+
+# 销售税率设置（按州分类）
+sales_tax_rate_by_state = {
+    'california': 0.0725,
+    'new york': 0.04,
+    'texas': 0.0625,
+}
+
+# 交易规则字典
+transaction_rules = {
+    'sales': {'keywords': ['sold', 'sales', 'payment received', 'goods sold'], 'main_account': 'Sales Revenue', 'taxable': True},
+    'purchase': {'keywords': ['purchased', 'buy', 'procure', 'purchase'], 'main_account': 'Inventory', 'taxable': False},
+    'lease_out': {'keywords': ['leased out', 'lease income', 'rented out'], 'main_account': 'Lease Income', 'taxable': False},
+    # 其他规则同上，省略
+}
+
+# 默认货币
+CURRENCY = "USD"
+
+# 根据州名返回相应的税率
+def get_tax_rate(state):
+    """
+    根据州名返回相应的税率
+    """
+    return sales_tax_rate_by_state.get(state.lower(), 0)  # 默认无税
+
+def extract_entities(sentence):
+    """
+    提取交易语句中的关键信息（如交易类型和金额）
+    """
+    entities = {'transaction_type': '', 'amount': 0, 'state': ''}
+
+    # 使用 spaCy 进行命名实体识别（NER）
+    doc = nlp(sentence)
+    
+    # 假设交易类型是 TRANSACTION_TYPES 中预定义的类型
+    for token in doc:
+        if token.text.lower() in [t.lower() for t in TRANSACTION_TYPES]:  # 匹配交易类型
+            entities['transaction_type'] = token.text
+
+    # 假设金额是数字
+    for ent in doc.ents:
+        if ent.label_ == 'MONEY':  # 提取金额实体
+            entities['amount'] = float(ent.text.replace(',', '').replace('USD', '').strip())
+
+    # 提取州信息
+    for token in doc:
+        if token.text.lower() in sales_tax_rate_by_state.keys():  # 如果token是州名
+            entities['state'] = token.text
+
+    return entities
+
 def process_transaction(transaction_input):
     """
-    处理用户输入的交易语句并生成相应的会计分录。
+    处理用户输入的交易语句并生成相应的会计分录
     """
     journal_entries = []
-    
-    # 将输入的交易语句按换行符或句号等分割为多个句子，处理更加灵活
-    sentences = re.split(r'[;。]', transaction_input)  # 可以考虑用正则分割多个句子
+
+    # 将输入的交易语句按句号或其他分隔符分割成多个句子
+    sentences = re.split(r'[;，。]', transaction_input)  # 使用正则分割多个句子
     for sentence in sentences:
         sentence = sentence.strip()
         if not sentence:
             continue
-        
-        print(f"Processing sentence: {sentence}")
-        
+
         # 提取实体信息
         entities = extract_entities(sentence)
         
-        # 根据交易类型调用相应的规则函数
         transaction_type = entities['transaction_type']
-        print(f"Transaction type: {transaction_type}")  # 打印交易类型，用于调试
-        
-        rule_function_name = transaction_rules.get(transaction_type, {}).get('rule')
-        
-        if rule_function_name:
-            # 获取规则函数并调用
-            rule_function = globals().get(rule_function_name)
-            if rule_function:
-                journal_entry = rule_function(entities)  # 生成会计分录
-                journal_entries.append(journal_entry)
-            else:
-                print(f"Rule function '{rule_function_name}' not found.")
+        state = entities['state'] or "california"  # 默认使用加州
+        tax_rate = get_tax_rate(state)  # 获取州的税率
+
+        # 获取交易规则
+        rule = transaction_rules.get(transaction_type.lower())
+        if rule:
+            main_account = rule.get('main_account')
+            taxable = rule.get('taxable', False)
+
+            if taxable:
+                # 如果是销售交易，计算销售税
+                tax_amount = entities['amount'] * tax_rate
+                journal_entries.append({"debit": main_account, "credit": "Tax Payable", "amount": tax_amount})
+                entities['amount'] -= tax_amount  # 减去税额
+
+            journal_entries.append({"debit": "Bank Deposit", "credit": main_account, "amount": entities['amount']})
         else:
-            print(f"Unable to process transaction: {sentence}")
+            st.write(f"Unable to process transaction: {sentence}")
 
     return journal_entries
 
-# ============================
-# 1. 公共属性：税率、支付方式等
-# ============================
+# Streamlit UI部分
+st.title('Intelligent Accounting Software')
+st.write('Please input the transaction information, and the system will automatically generate journal entries.')
 
-# 销售税率设置（按州分类）
-sales_tax_rate_by_state = {
-    'california': 0.0725,  # 7.25% 销售税
-    'new york': 0.04,      # 假设纽约销售税4%
-    'texas': 0.0625,       # 假设德克萨斯州销售税6.25%
-    # 可以继续扩展其他州的税率
-}
+# 用户输入的交易语句
+transaction_input = st.text_area("Enter transaction details", "")
 
-# 支付方式的关键词（对应的支付方式）
-payment_keywords = {
-    'cash': ['cash', 'money', 'paid in cash'],
-    'bank_transfer': ['bank transfer', 'bank deposit', 'wire transfer'],
-    'cheque': ['cheque', 'check'],
-    'credit_card': ['credit card', 'card payment'],
-    'other': ['other', 'payment method unknown'],
-}
+if transaction_input:
+    journal_entries = process_transaction(transaction_input)
+    if journal_entries:
+        st.write("Generated Journal Entries:")
+        st.write(journal_entries)
 
-# 默认交易属性（可以根据需求调整）
-transaction_properties = {
-    'state': 'california',  # 默认州为 California
-    'not_received': False,  # 默认款项未收到
-    'not_paid': False,      # 默认款项已支付
-}
-
-# ============================
-# 2. 规则字典：交易类型及其规则
-# ============================
-
+# 交易规则字典：交易类型及其规则
 transaction_rules = {
     'sales': {
         'keywords': ['sold', 'sales', 'payment received', 'goods sold'],
@@ -278,567 +325,65 @@ transaction_rules = {
         'rule': 'inventory_adjustment_transaction_rules'
     }
 }
-
-# ============================
-# 2. 识别语句：提取关键信息并选择交易规则
-# ============================
 def extract_entities(sentence):
     """
-    使用 spaCy 提取交易语句中的金额、支付方式、州信息，并判断是否已支付款项或未收到款项。
-    同时，利用语义分析识别交易类型。
+    提取交易语句中的关键信息（如交易类型和金额）
     """
-    # 处理句子
-    doc = nlp(sentence)  
-    entities = {
-        'amounts': [],
-        'payment_methods': [],
-        'state': 'california',  # 默认州为 California
-        'not_received': False,  # 默认款项未收到
-        'not_paid': False,      # 默认款项已支付
-        'transaction_type': 'Unknown'  # 默认交易类型为未知
-    }
+    entities = {'transaction_type': '', 'amount': 0}
 
-    # 提取金额
-    for ent in doc.ents:
-        if ent.label_ == "MONEY":
-            entities['amounts'].append(float(ent.text.replace('$', '').replace(',', '')))
-
-    # 查找支付方式
-    for method, keywords in payment_keywords.items():
-        for keyword in keywords:
-            if keyword in sentence.lower():
-                if method not in entities['payment_methods']:
-                    entities['payment_methods'].append(method)
-
-    # 提取州名，使用正则匹配
-    state_keywords = ['california', 'new york', 'texas', 'florida', 'georgia', 'washington', 'oregon']
-    for state in state_keywords:
-        if re.search(r'\b' + re.escape(state) + r'\b', sentence.lower()):  # 精确匹配州名
-            entities['state'] = state
-            break
-
-    # 判断是否包含 "not paid" 或 "not received"
-    for token in doc:
-        if token.text.lower() == 'not' and token.head.lemma_ == 'receive':
-            entities['not_received'] = True  # 未收到款项
-        elif token.text.lower() == 'not' and token.head.lemma_ == 'pay':
-            entities['not_paid'] = True  # 未支付款项
-
-    # 判断交易类型：通过动词、名词和关键词来匹配
-    for token in doc:
-        if token.pos_ == 'VERB':
-            # 销售
-            if token.lemma_ in ['sell', 'sales', 'sold']:
-                entities['transaction_type'] = 'sales'
-            # 采购
-            elif token.lemma_ in ['purchase', 'buy', 'procure', 'bought']:
-                entities['transaction_type'] = 'purchase'
-            # 投资
-            elif token.lemma_ in ['invest', 'investment', 'bought shares', 'purchased bonds']:
-                entities['transaction_type'] = 'investment'
-            # 收款
-            elif token.lemma_ in ['received', 'receipt', 'received payment']:
-                entities['transaction_type'] = 'receipts'
-            # 付款
-            elif token.lemma_ in ['pay', 'payment', 'paid']:
-                entities['transaction_type'] = 'payments'
-            # 租赁
-            elif token.lemma_ in ['lease', 'leased', 'rented']:
-                entities['transaction_type'] = 'lease_out'
-            # 还款
-            elif token.lemma_ in ['repay', 'loan repayment', 'pay off loan']:
-                entities['transaction_type'] = 'repayment'
-            # 捐赠
-            elif token.lemma_ in ['donate', 'donation']:
-                entities['transaction_type'] = 'donation_received'
-            # 政府补助
-            elif token.lemma_ in ['grant', 'government subsidy']:
-                entities['transaction_type'] = 'government_grant'
+    # 使用 spaCy 进行命名实体识别（NER）
+    doc = nlp(sentence)
     
+    # 假设交易类型是 TRANSACTION_TYPES 中预定义的类型
+    for token in doc:
+        if token.text.lower() in [t.lower() for t in TRANSACTION_TYPES]:  # 匹配交易类型
+            entities['transaction_type'] = token.text
+
+    # 假设金额是数字
+    for ent in doc.ents:
+        if ent.label_ == 'MONEY':  # 提取金额实体
+            entities['amount'] = float(ent.text.replace(',', '').replace('USD', '').strip())
+
     return entities
 
-
-# 交易规则函数（这里只展示销售和采购规则，其他规则类似修改）
-#销售交易规则
-def sales_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods'] or ['bank transfer']
-    not_received = entities['not_received']
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        sales_tax = round(amount * sales_tax_rate_by_state.get(entities['state'], 0), 2)
-        counterpart_account = payment_methods[i] if i < len(payment_methods) else payment_methods[0]
-
-        if not_received:
-            journal_entry[f'Debit_{i+1}'] = f"Accounts Receivable {amount + sales_tax}"
-            journal_entry[f'Credit_{i+1}'] = f"Sales Revenue {amount}"
-            journal_entry[f'Credit_Tax_{i+1}'] = f"Sales Tax Payable {sales_tax}"
+def process_transaction(transaction_input):
+    """
+    处理用户输入的交易语句并生成相应的会计分录
+    """
+    journal_entries = []
+    
+    # 将输入的交易语句按句号或其他分隔符分割成多个句子
+    sentences = re.split(r'[;。]', transaction_input)  # 使用正则分割多个句子
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        
+        # 打印正在处理的句子
+        st.write(f"Processing sentence: {sentence}")
+        
+        # 提取实体信息
+        entities = extract_entities(sentence)
+        
+        # 根据交易类型调用相应的规则函数
+        transaction_type = entities['transaction_type']
+        st.write(f"Transaction type: {transaction_type}")  # 打印交易类型，用于调试
+        
+        # 获取规则函数名称
+        rule_function_name = transaction_rules.get(transaction_type.lower(), {}).get('rule')
+        
+        if rule_function_name:
+            # 获取并调用规则函数
+            rule_function = globals().get(rule_function_name)
+            if rule_function:
+                journal_entry = rule_function(entities)  # 生成会计分录
+                journal_entries.append(journal_entry)
+            else:
+                st.write(f"Rule function '{rule_function_name}' not found.")
         else:
-            journal_entry[f'Debit_{i+1}'] = f"{counterpart_account.capitalize()} {amount + sales_tax}"
-            journal_entry[f'Credit_{i+1}'] = f"Sales Revenue {amount}"
-            journal_entry[f'Credit_Tax_{i+1}'] = f"Sales Tax Payable {sales_tax}"
+            st.write(f"Unable to process transaction: {sentence}")
 
-    return journal_entry
+    return journal_entries
 
-
-# 采购交易规则
-def purchase_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods'] or ['bank transfer']
-    not_paid = entities['not_paid']
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = payment_methods[i] if i < len(payment_methods) else payment_methods[0]
-
-        if not_paid:
-            journal_entry[f'Debit_{i+1}'] = f"Inventory {amount}"
-            journal_entry[f'Credit_{i+1}'] = f"Accounts Payable {amount}"
-        else:
-            journal_entry[f'Debit_{i+1}'] = f"Inventory {amount}"
-            journal_entry[f'Credit_{i+1}'] = f"{counterpart_account.capitalize()} {amount}"
-
-    return journal_entry
-
-
-# 租入交易规则
-def lease_in_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods'] or ['bank transfer']
-    not_paid = entities['not_paid']
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = payment_methods[i] if i < len(payment_methods) else payment_methods[0]
-
-        if not_paid:
-            journal_entry[f'Debit_{i+1}'] = f"Lease Expense {amount}"
-            journal_entry[f'Credit_{i+1}'] = f"Accounts Payable {amount}"
-        else:
-            journal_entry[f'Debit_{i+1}'] = f"Lease Expense {amount}"
-            journal_entry[f'Credit_{i+1}'] = f"{counterpart_account.capitalize()} {amount}"
-
-    return journal_entry
-
-
-# 租出交易规则
-def lease_out_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods'] or ['bank transfer']
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = payment_methods[i] if i < len(payment_methods) else payment_methods[0]
-
-        journal_entry[f'Debit_{i+1}'] = f"{counterpart_account.capitalize()} {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"Lease Income {amount}"
-
-    return journal_entry
-
-
-# 对外投资交易规则
-def investment_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods'] or ['bank transfer']
-    not_paid = entities['not_paid']
-    journal_entry = {}
-
-    if not_paid:
-        journal_entry['Debit_1'] = f"Investment {sum(amounts)}"
-        journal_entry['Credit_1'] = f"Accounts Payable {sum(amounts)}"
-    else:
-        for i, amount in enumerate(amounts):
-            counterpart_account = payment_methods[i] if i < len(payment_methods) else payment_methods[0]
-            journal_entry[f'Debit_{i+1}'] = f"Investment {amount}"
-            journal_entry[f'Credit_{i+1}'] = f"{counterpart_account.capitalize()} {amount}"
-
-    return journal_entry
-
-
-# 筹资交易规则
-def fundraising_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods'] or ['bank transfer']
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = payment_methods[i] if i < len(payment_methods) else payment_methods[0]
-
-        journal_entry[f'Debit_{i+1}'] = f"{counterpart_account.capitalize()} {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"Loan {amount}"
-
-    return journal_entry
-
-
-# 还款交易规则
-def repayment_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods'] if entities['payment_methods'] else ['bank transfer']
-    journal_entry = {}
-
-    total_amount = sum(amounts)
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = payment_methods[i] if i < len(payment_methods) else payment_methods[0]
-
-        journal_entry[f'Debit_{i+1}'] = f"Loan {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account.capitalize()} {amount}"
-
-    # 仅输出分录部分
-    for key, value in journal_entry.items():
-        print(f"{key}: {value}")
-    
-    return journal_entry
-
-
-# 收款交易规则
-def receipts_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods'] if entities['payment_methods'] else ['bank transfer']
-    journal_entry = {}
-
-    total_amount = sum(amounts)
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = payment_methods[i] if i < len(payment_methods) else payment_methods[0]
-
-        journal_entry[f'Debit_{i+1}'] = f"{counterpart_account.capitalize()} {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"Accounts Receivable {amount}"
-
-    # 仅输出分录部分
-    for key, value in journal_entry.items():
-        print(f"{key}: {value}")
-    
-    return journal_entry
-
-
-# 付款交易规则
-def payments_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods'] if entities['payment_methods'] else ['bank transfer']
-    journal_entry = {}
-
-    total_amount = sum(amounts)
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = payment_methods[i] if i < len(payment_methods) else payment_methods[0]
-
-        journal_entry[f'Debit_{i+1}'] = f"Accounts Payable {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account.capitalize()} {amount}"
-
-    # 仅输出分录部分
-    for key, value in journal_entry.items():
-        print(f"{key}: {value}")
-    
-    return journal_entry
-
-
-# 其他应收类交易规则
-def other_receivables_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods'] if entities['payment_methods'] else ['bank transfer']
-    journal_entry = {}
-
-    total_amount = sum(amounts)
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = payment_methods[i] if i < len(payment_methods) else payment_methods[0]
-
-        journal_entry[f'Debit_{i+1}'] = f"{counterpart_account.capitalize()} {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"Other Receivables {amount}"
-
-    # 仅输出分录部分
-    for key, value in journal_entry.items():
-        print(f"{key}: {value}")
-    
-    return journal_entry
-
-def repayment_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-    
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Loan {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Repayment):")
-    print(journal_entry)
-
-def receipts_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Accounts Receivable {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Receipts):")
-    print(journal_entry)
-
-def payments_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Accounts Payable {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Payments):")
-    print(journal_entry)
-
-def other_receivables_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Other Receivables {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Other Receivables):")
-    print(journal_entry)
-
-def other_payables_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Other Payables {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Other Payables):")
-    print(journal_entry)
-
-def prepaid_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Prepaid Revenue {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Prepaid):")
-    print(journal_entry)
-
-def prepaid_expenses_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Prepaid Expenses {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Prepaid Expenses):")
-    print(journal_entry)
-
-def shareholder_investments_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Shareholder Equity {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Shareholder Investments):")
-    print(journal_entry)
-
-def shareholder_withdrawals_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Shareholder Equity {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Shareholder Withdrawals):")
-    print(journal_entry)
-
-def external_investment_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Investment {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (External Investment):")
-    print(journal_entry)
-
-def loan_received_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Loan'
-        journal_entry[f'Debit_{i+1}'] = f"Bank Deposit {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Loan Received):")
-    print(journal_entry)
-
-def loan_repayment_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Loan {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Loan Repayment):")
-    print(journal_entry)
-
-def dividend_payment_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Dividend Payable {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Dividend Payment):")
-    print(journal_entry)
-
-def donation_received_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Donation Revenue {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Donation Received):")
-    print(journal_entry)
-
-def government_grant_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Government Grant Revenue {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Government Grant):")
-    print(journal_entry)
-
-def employee_reimbursement_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Employee Reimbursement {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Employee Reimbursement):")
-    print(journal_entry)
-
-def contingent_event_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Contingent Liability {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Contingent Event):")
-    print(journal_entry)
-
-def asset_swap_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Cash'
-        journal_entry[f'Debit_{i+1}'] = f"Asset Swap {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Asset Swap):")
-    print(journal_entry)
-
-def inventory_adjustment_transaction_rules(entities):
-    amounts = entities['amounts']
-    payment_methods = entities['payment_methods']
-    state = entities['state']
-    
-    journal_entry = {}
-
-    for i, amount in enumerate(amounts):
-        counterpart_account = 'Inventory'
-        journal_entry[f'Debit_{i+1}'] = f"Inventory {amount}"
-        journal_entry[f'Credit_{i+1}'] = f"{counterpart_account} {amount}"
-
-    print("\nGenerated Journal Entry (Inventory Adjustment):")
-    print(journal_entry)
-
-# ============================
-
-
+# 已经定义了各个交易规则的函数，如 sales_transaction_rules, purchase_transaction_rules 等
+# 删除重复的规则函数定义部分
