@@ -23,7 +23,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Install spaCy model
+        run: |
+          python -m spacy download en_core_web_sm  # 下载并安装 spaCy 模型
+
       - name: Run Streamlit app
         run: |
-          streamlit run streamlit_app.py  # 确保这是正确的文件路径
+          streamlit run streamlit_app.py
 
